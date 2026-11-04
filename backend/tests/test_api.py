@@ -7,7 +7,7 @@ def test_root(client):
 
 def test_rules_are_seeded(client):
     rules = client.get("/rules").json()
-    assert len(rules) == 7
+    assert len(rules) == 6
     assert {r["name"] for r in rules} >= {"Brute Force", "Port Scan"}
 
 

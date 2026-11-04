@@ -11,8 +11,9 @@ import psutil
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.db.database import get_db_connection, init_db, log_alert, log_event
+from app.db.database import get_db_connection, init_db, load_rules, log_alert, log_event
 from app.engine.detector import DetectionEngine
+from app.engine.rules import RuleEngine
 from app.simulation.attacker import SimulationModule
 
 app = FastAPI(title="SentinelSandbox API")
@@ -121,8 +122,8 @@ def schedule_broadcast(message: dict):
 
 def on_alert(alert_data):
     """
-    Callback triggered by the DetectionEngine or SimulationModule when a threat is identified.
-    Persists the alert to the database and broadcasts it to connected UI clients.
+    Called by the RuleEngine or the live DetectionEngine when a threat is identified.
+    The single place that stores an alert; then broadcasts it to the UI.
     """
     # Persist to DB for history
     log_alert(
@@ -133,16 +134,14 @@ def on_alert(alert_data):
         alert_data.get("rule_name")
     )
 
-    # Update global metrics
-    stats["packets_monitored"] += alert_data.get("packets_detected", 1)
-
     schedule_broadcast(alert_data)
 
 
 def on_event(event_data):
     """
-    Callback triggered for non-alert system events (e.g., intermediate simulation steps).
-    Logs the activity and broadcasts it to the UI activity feed.
+    Called for every telemetry event (from the simulations). Stores it, shows it
+    in the activity feed, then hands it to the rule engine, which decides
+    whether it completes an attack pattern.
     """
     log_event(
         event_data.get("event_type", "unknown"),
@@ -152,11 +151,13 @@ def on_event(event_data):
     stats["packets_monitored"] += 1
 
     schedule_broadcast(event_data)
+    rule_engine.process(event_data)
 
 
 # Initialize core modules
+rule_engine = RuleEngine(load_rules(), on_alert)
 detector = DetectionEngine(on_alert)
-attacker = SimulationModule(on_alert, on_event)
+attacker = SimulationModule(on_event)
 
 @app.on_event("startup")
 async def startup_event():

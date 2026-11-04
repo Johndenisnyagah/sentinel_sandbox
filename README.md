@@ -10,18 +10,31 @@ Be clear about what is real and what is simulated:
 
 | Part | Status |
 |---|---|
-| Attack simulations (5 types) | Real code, synthetic data. Each one emits a sequence of events with randomised source IPs. |
-| Alerts | **Scripted.** Each simulation currently raises its own alert at the end; no rule evaluates the events yet. |
-| Detection rules panel | **Display only.** The thresholds in the `rules` table are shown but not yet applied. |
-| Live packet sniffing (Scapy) and host monitoring (psutil) | Present in `detector.py` but **switched off** (needs root, and has known bugs). |
+| Attack simulations (5 types) | Real code, synthetic data. Each one emits a sequence of events (failed logins, port probes, packet bursts, SQLi payloads) from a random source IP. It never raises an alert itself. |
+| Alerts | **Detected.** Every event goes through the rule engine (`app/engine/rules.py`), which counts it per source IP in a sliding window and alerts when a rule's threshold is exceeded. |
+| Detection rules panel | Shows the same rows the engine applies, read from the `rules` table. |
+| Live packet sniffing (Scapy) and host monitoring (psutil) | In `detector.py`, **off by default**: sniffing needs root, so it starts only with `SENTINEL_LIVE_MONITOR=1`. Detects port scans in a 10 s window and CPU above 90 %. |
 | Traffic chart | **Placeholder values**, not measured traffic. |
 | Persistence | Real. Alerts and events are stored in SQLite and served by the API. |
 
-Turning the scripted alerts into a real threshold engine is the next step (see the roadmap).
+### How detection works
+
+Each rule names the event type it watches, a measure, a threshold and a window:
+
+| Rule | Watches | Measure | Fires when, per source IP |
+|---|---|---|---|
+| Brute Force | `failed_login` | count | more than 5 in 30 s |
+| Port Scan | `connection_attempt` | distinct ports | more than 10 in 10 s |
+| Traffic Flood | `traffic_burst` | sum of packets | more than 1000 in 60 s |
+| SYN Flood | `syn_burst` | sum of packets | more than 50 in 5 s |
+| SQLi Probe | `suspicious_query` | count | more than 3 in 10 s |
+| Host Metric Anomaly | (live monitor only) | CPU % | above 90 % |
+
+Old events drop out of the window as time passes, and a source's window is cleared after it fires, so one burst gives one alert. The simulations are sized to cross their rule's threshold. The tests cover the boundaries (5 failed logins no alert, 6 alert), the sliding window and each simulation end to end.
 
 ## Architecture
 
-- **Backend (Python, FastAPI):** `main.py` serves the REST API and a WebSocket that broadcasts events and alerts. `app/simulation/attacker.py` generates the attack sequences. `app/engine/detector.py` holds the (disabled) Scapy/psutil monitor. `app/db/database.py` manages SQLite.
+- **Backend (Python, FastAPI):** `main.py` serves the REST API and a WebSocket that broadcasts events and alerts. `app/simulation/attacker.py` generates the attack sequences. `app/engine/rules.py` is the threshold rule engine. `app/engine/detector.py` is the opt-in Scapy/psutil monitor. `app/db/database.py` manages SQLite.
 - **Frontend (React, Vite):** subscribes to the WebSocket and renders status, alerts, an activity feed, the rules list and the simulation controls. Styled with Tailwind CSS v4.
 
 ## Getting started
@@ -43,11 +56,7 @@ npm run dev
 
 ## Roadmap
 
-1. A rule engine that applies the `rules` table thresholds to the event stream in sliding time windows, so alerts are detected rather than scripted.
-2. Fix the disabled live monitor (duplicate alert writes, broadcasting from the sniffer thread, port-scan time window).
-3. Check the WebSocket `Origin` header (cross-site WebSocket hijacking, CWE-1385).
-4. Plot real event rates instead of placeholder chart values.
-5. Tests and CI.
+1. Plot real event rates instead of placeholder chart values.
 
 ## License
 

@@ -12,6 +12,31 @@ DB_PATH = os.environ.get(
     "SENTINEL_DB_PATH", os.path.join(os.path.dirname(__file__), "sentinel.db")
 )
 
+# (name, event_type it watches, measure, threshold, window s, severity, shown text).
+# A rule fires when the measure over the window is GREATER than the threshold.
+DEFAULT_RULES = [
+    ("Brute Force", "failed_login", "count", 5, 30, "HIGH", ">5 failed logins / 30s"),
+    ("Port Scan", "connection_attempt", "distinct:port", 10, 10, "CRITICAL", ">10 distinct ports / 10s"),
+    ("Traffic Flood", "traffic_burst", "sum:packets", 1000, 60, "MEDIUM", ">1000 packets / 60s"),
+    ("SYN Flood", "syn_burst", "sum:packets", 50, 5, "CRITICAL", ">50 SYN packets / 5s"),
+    ("SQLi Probe", "suspicious_query", "count", 3, 10, "HIGH", ">3 SQL injection payloads / 10s"),
+    ("Host Metric Anomaly", "cpu_usage", "live", 90, 0, "HIGH", "CPU > 90% (live monitor only)"),
+]
+
+
+def load_rules():
+    """Rules the engine applies (rows with the 'live' measure belong to the live monitor)."""
+    from ..engine.rules import Rule
+
+    conn = get_db_connection()
+    rows = conn.execute(
+        "SELECT name, pattern, measure, threshold, window, severity, condition_text "
+        "FROM rules WHERE measure != 'live'"
+    ).fetchall()
+    conn.close()
+    return [Rule(**dict(r)) for r in rows]
+
+
 def init_db():
     """
     Initializes the SQLite database with required tables if they do not exist.
@@ -44,12 +69,18 @@ def init_db():
         )
         """)
 
-        # Rules Table — Stores threshold-based detection rules
+        # Rules Table — threshold rules applied by app/engine/rules.py.
+        # Databases from before the rule engine have no `measure` column;
+        # their rules were display-only, so they are replaced.
+        cols = [row[1] for row in cursor.execute("PRAGMA table_info(rules)")]
+        if cols and "measure" not in cols:
+            cursor.execute("DROP TABLE rules")
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS rules (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL,
             pattern TEXT,
+            measure TEXT NOT NULL DEFAULT 'count',
             threshold INTEGER,
             window INTEGER,
             severity TEXT,
@@ -57,22 +88,12 @@ def init_db():
         )
         """)
 
-        # Bootstrap default rules for simulation purposes
         cursor.execute("SELECT COUNT(*) FROM rules")
         if cursor.fetchone()[0] == 0:
-            default_rules = [
-                ("Brute Force", "failed_login", 5, 30, "HIGH", ">5 login failures / 30s"),
-                ("Port Scan", "connection_attempt", 10, 10, "CRITICAL", ">10 ports accessed / 10s"),
-                ("Traffic Flood", "packet_count", 1000, 60, "MEDIUM", ">1000 packets / 60s"),
-                ("Host Metric Anomaly", "cpu_usage", 90, 30, "HIGH", "CPU > 90% for 30s"),
-                ("DDoS Botnet Pattern", "syn_flood", 50, 5, "CRITICAL", ">50 SYN packets / 5s"),
-                ("Unauthorized Access", "auth_bypass", 1, 1, "CRITICAL", "Admin path probe detected"),
-                ("SQLi Probe", "suspicious_query", 3, 10, "HIGH", "SQL injection patterns detected")
-            ]
             cursor.executemany(
-                "INSERT INTO rules (name, pattern, threshold, window, severity, condition_text) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
-                default_rules
+                "INSERT INTO rules (name, pattern, measure, threshold, window, severity, condition_text) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                DEFAULT_RULES,
             )
 
         conn.commit()
