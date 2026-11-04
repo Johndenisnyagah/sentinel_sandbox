@@ -1,6 +1,11 @@
 # Changelog
 
-## Unreleased (November 2026): detection made real
+## Unreleased (November 2026)
+
+### Removed
+- The hosted demo (Render backend, Vercel frontend) and its config files (`render.yaml`, `frontend/vercel.json`). The free-tier backend slept when idle and was too slow to use; the project now runs locally only. (#8)
+
+## November 2026: detection made real
 
 Findings from a portfolio audit, fixed in PRs #1–#7.
 

@@ -4,7 +4,7 @@
 
 An educational **attack simulator with a threshold-based detection engine** and a SOC-style dashboard. You trigger synthetic attacks; the simulator emits only telemetry events; a rule engine counts them per source IP in sliding time windows and raises the alerts.
 
-**[Live demo](https://sentinel-sanbox.vercel.app/)** (the backend runs on a free tier and may take a minute to wake up)
+It runs locally (two commands, see [Getting started](#getting-started)). There is no hosted demo: the free-tier backend slept when idle and was too slow to use, so it was taken down.
 
 ![Dashboard after a brute force, a port scan and an SQLi probe: three detected alerts, the activity feed and the rules the engine applied](docs/screenshot.png)
 
@@ -40,7 +40,7 @@ Old events drop out of the window as time passes. A source's window is cleared a
 - **WebSocket Origin check.** CORS middleware does not apply to WebSockets, so the handshake checks `Origin` against `ALLOWED_ORIGINS` and refuses others with 1008 / HTTP 403 (cross-site WebSocket hijacking, CWE-1385).
 - CORS allowlist from `ALLOWED_ORIGINS` (default: the local Vite origins, never `*`); credentials off.
 - Parameterised SQL throughout.
-- Live sniffing is opt-in and never starts in the hosted demo.
+- Live sniffing is opt-in (`SENTINEL_LIVE_MONITOR=1`) and off by default.
 
 ## Architecture
 
