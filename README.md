@@ -1,66 +1,54 @@
 # Sentinel_Sandbox
 
-Sentinel_Sandbox is a high-fidelity, educational **Intrusion Detection System (IDS)** dashboard and simulator. It provides a real-time SoC (Security Operations Center) experience by monitoring network traffic, host telemetry, and simulating common cyber-attack patterns.
+An educational **attack simulator with a detection dashboard**. You trigger synthetic attacks (brute force, port scan, traffic flood, SYN flood, SQL injection probes) and watch the resulting events and alerts stream into a SOC-style dashboard over a WebSocket.
 
-**[🚀 View Live Demo](https://sentinel-sanbox.vercel.app/)**
+**[Live demo](https://sentinel-sanbox.vercel.app/)** (the backend runs on a free tier and may take a minute to wake up)
 
-## Features
+## What it does today
 
-- **Real-time Monitoring**: Live network traffic tracking and system telemetry (CPU, connections, packet counts).
-- **Attack Simulation**: Trigger synthetic BRUTE_FORCE, PORT_SCAN, and TRAFFIC_FLOOD attacks to test detection logic.
-- **Visual Intelligence**: Real-time traffic Area charts using Recharts and a ranked source IP tracking table.
-- **Premium UI/UX**:
-  - Clean, light-mode project aesthetic with burnt-orange accents.
-  - Sophisticated micro-animations (center-expanding lines, glow-lifts, shimmer effects).
-  - Custom crosshair mouse tracker and specialized branding icons.
-  - Investigative Drill-down: Detailed modals for alert forensic analysis.
-- **Heuristic Detection**: Python-based engine using Scapy for packet analysis and psutil for host monitoring.
+Be clear about what is real and what is simulated:
+
+| Part | Status |
+|---|---|
+| Attack simulations (5 types) | Real code, synthetic data. Each one emits a sequence of events with randomised source IPs. |
+| Alerts | **Scripted.** Each simulation currently raises its own alert at the end; no rule evaluates the events yet. |
+| Detection rules panel | **Display only.** The thresholds in the `rules` table are shown but not yet applied. |
+| Live packet sniffing (Scapy) and host monitoring (psutil) | Present in `detector.py` but **switched off** (needs root, and has known bugs). |
+| Traffic chart | **Placeholder values**, not measured traffic. |
+| Persistence | Real. Alerts and events are stored in SQLite and served by the API. |
+
+Turning the scripted alerts into a real threshold engine is the next step (see the roadmap).
 
 ## Architecture
 
-### Backend (Python/FastAPI)
-- **`main.py`**: The central orchestrator handling API routing and WebSocket broadcasts.
-- **`DetectionEngine`**: Monitors live traffic (via Scapy) and host metrics (via psutil).
-- **`SimulationModule`**: Generates multi-phase synthetic attack patterns.
-- **`database.py`**: Manages a persistent SQLite store for alerts, logs, and rules.
+- **Backend (Python, FastAPI):** `main.py` serves the REST API and a WebSocket that broadcasts events and alerts. `app/simulation/attacker.py` generates the attack sequences. `app/engine/detector.py` holds the (disabled) Scapy/psutil monitor. `app/db/database.py` manages SQLite.
+- **Frontend (React, Vite):** subscribes to the WebSocket and renders status, alerts, an activity feed, the rules list and the simulation controls. Styled with Tailwind CSS v4.
 
-### Frontend (React/Vite)
-- **State Management**: Real-time synchronization with the backend via WebSockets.
-- **UI Components**: Atomic, documented React components styled with Tailwind CSS v4 and Framer Motion.
-- **Animations**: CSS-driven premium transitions for an "interactive" feel.
+## Getting started
 
-## Getting Started
+Prerequisites: Python 3.10+ and Node.js 18+.
 
-### Prerequisites
-- Python 3.10+
-- Node.js 18+
-- (Optional) Administrative/Sudo privileges for live packet sniffing with Scapy.
-
-### 1. Backend Setup
 ```bash
+# Backend (http://localhost:8000)
 cd backend
 pip install -r requirements.txt
-python main.py
-```
-*The API will be available at http://localhost:8000*
+python -m uvicorn main:app --reload
 
-### 2. Frontend Setup
-```bash
+# Frontend (http://localhost:5173)
 cd frontend
+cp .env.example .env
 npm install
 npm run dev
 ```
-*The Dashboard will be live at http://localhost:5173*
 
-## Tech Stack
+## Roadmap
 
-- **Backend**: FastAPI, Scapy, Psutil, SQLite3, Uvicorn, Pydantic.
-- **Frontend**: React 18, Vite, Tailwind CSS v4, Framer Motion, Recharts, Lucide-React, Axios.
+1. A rule engine that applies the `rules` table thresholds to the event stream in sliding time windows, so alerts are detected rather than scripted.
+2. Fix the disabled live monitor (duplicate alert writes, broadcasting from the sniffer thread, port-scan time window).
+3. Check the WebSocket `Origin` header (cross-site WebSocket hijacking, CWE-1385).
+4. Plot real event rates instead of placeholder chart values.
+5. Tests and CI.
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-- **Styling**: Modern minimal design with custom SVG iconography and cursor tracking.
-
----
-*Sentinel_Sandbox // v2.0 // Educational Cybersecurity Sandbox*
+MIT, see [LICENSE](LICENSE).
