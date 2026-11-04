@@ -87,6 +87,24 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 
+# The server's event loop, captured at startup. Alerts can come from the
+# sniffer thread, which has no loop of its own, so they are handed over here.
+main_loop: asyncio.AbstractEventLoop | None = None
+
+
+def schedule_broadcast(message: dict):
+    """Broadcast from any thread: on the loop thread schedule a task, elsewhere hand over safely."""
+    if main_loop is None:
+        return  # server not started (e.g. a unit test calling the callback directly)
+    try:
+        running = asyncio.get_running_loop()
+    except RuntimeError:
+        running = None
+    if running is main_loop:
+        main_loop.create_task(manager.broadcast(message))
+    else:
+        asyncio.run_coroutine_threadsafe(manager.broadcast(message), main_loop)
+
 def on_alert(alert_data):
     """
     Callback triggered by the DetectionEngine or SimulationModule when a threat is identified.
@@ -104,15 +122,8 @@ def on_alert(alert_data):
     # Update global metrics
     stats["packets_monitored"] += alert_data.get("packets_detected", 1)
 
-    # Broadcast to WebSocket clients
-    try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            asyncio.run_coroutine_threadsafe(manager.broadcast(alert_data), loop)
-        else:
-            asyncio.run(manager.broadcast(alert_data))
-    except Exception as e:
-        print(f"Error broadcasting alert: {e}")
+    schedule_broadcast(alert_data)
+
 
 def on_event(event_data):
     """
@@ -126,15 +137,8 @@ def on_event(event_data):
     )
     stats["packets_monitored"] += 1
 
-    # Broadcast to WebSocket clients
-    try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            asyncio.run_coroutine_threadsafe(manager.broadcast(event_data), loop)
-        else:
-            asyncio.run(manager.broadcast(event_data))
-    except Exception as e:
-        print(f"Error broadcasting event: {e}")
+    schedule_broadcast(event_data)
+
 
 # Initialize core modules
 detector = DetectionEngine(on_alert)
@@ -143,9 +147,13 @@ attacker = SimulationModule(on_alert, on_event)
 @app.on_event("startup")
 async def startup_event():
     """Handles logic needed when the server starts up."""
+    global main_loop
+    main_loop = asyncio.get_running_loop()
     # Start the WebSocket heartbeat loop to prevent Render timeouts
     manager.start_heartbeat()
-    # detector.start()  # Uncomment to enable live NIC monitoring (requires Admin/Sudo)
+    # Live sniffing needs root, so it is opt-in
+    if os.getenv("SENTINEL_LIVE_MONITOR") == "1":
+        detector.start()
 
 @app.on_event("shutdown")
 async def shutdown_event():
@@ -174,7 +182,8 @@ async def get_status():
     conn.close()
 
     return {
-        "ids_running": True,
+        "ids_running": True,  # the API is up
+        "live_monitor": detector.running,  # Scapy/psutil monitor (opt-in)
         "packets_monitored": stats["packets_monitored"] + event_count,
         "alerts_triggered": alert_count,
         "active_connections": len(manager.active_connections),
