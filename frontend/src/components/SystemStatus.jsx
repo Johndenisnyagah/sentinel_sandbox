@@ -16,7 +16,7 @@ const SystemStatus = ({ status }) => {
   const metrics = [
     { label: 'IDS Engine', value: isRunning ? 'RUNNING' : 'STOPPED', highlight: isRunning },
     { label: 'Live Monitor', value: status ? (liveMonitor ? 'ON' : 'OFF') : '—', highlight: liveMonitor },
-    { label: 'Packets Monitored', value: status?.packets_monitored?.toLocaleString() ?? '—' },
+    { label: 'Events Processed', value: status?.events_processed?.toLocaleString() ?? '—' },
     { label: 'Alerts Triggered', value: status?.alerts_triggered ?? '—' },
     { label: 'Active Connections', value: status?.active_connections ?? '—' },
     { label: 'CPU Usage', value: status?.cpu_usage != null ? `${Math.round(status.cpu_usage)}%` : '—' },

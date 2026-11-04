@@ -14,7 +14,7 @@ Be clear about what is real and what is simulated:
 | Alerts | **Detected.** Every event goes through the rule engine (`app/engine/rules.py`), which counts it per source IP in a sliding window and alerts when a rule's threshold is exceeded. |
 | Detection rules panel | Shows the same rows the engine applies, read from the `rules` table. |
 | Live packet sniffing (Scapy) and host monitoring (psutil) | In `detector.py`, **off by default**: sniffing needs root, so it starts only with `SENTINEL_LIVE_MONITOR=1`. Detects port scans in a 10 s window and CPU above 90 %. |
-| Traffic chart | **Placeholder values**, not measured traffic. |
+| Event-rate chart | Real: the number of events the dashboard received in each 2 s interval. The status panel's counts come from the database. |
 | Persistence | Real. Alerts and events are stored in SQLite and served by the API. |
 
 ### How detection works
@@ -53,10 +53,6 @@ cp .env.example .env
 npm install
 npm run dev
 ```
-
-## Roadmap
-
-1. Plot real event rates instead of placeholder chart values.
 
 ## License
 

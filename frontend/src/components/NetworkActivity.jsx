@@ -25,20 +25,22 @@ const NetworkActivity = ({ trafficData, topIPs }) => {
         <span className="ml-auto tag tag-primary">LIVE</span>
       </div>
 
-      {/* Real-time Traffic Volume Chart (Recharts) */}
+      {/* Events received per 2 s (Recharts) */}
+      <div className="text-[10px] text-text-muted mb-1">Events received per 2 s</div>
       <div className="h-[120px] w-full mb-3">
         <ResponsiveContainer width="100%" height="100%">
           <AreaChart data={trafficData}>
             <CartesianGrid strokeDasharray="3 3" stroke="#e8e8e8" vertical={false} />
             <XAxis dataKey="time" hide />
-            <YAxis stroke="#ccc" fontSize={10} />
+            <YAxis stroke="#ccc" fontSize={10} allowDecimals={false} />
             <Tooltip
               contentStyle={{ backgroundColor: '#fff', border: '1px solid #e8650a', fontSize: '11px', borderRadius: '0' }}
               itemStyle={{ color: '#e8650a' }}
             />
             <Area 
               type="monotone" 
-              dataKey="packets" 
+              dataKey="events"
+              name="Events" 
               stroke="#e8650a" 
               fill="#e8650a15" 
               strokeWidth={1.5} 

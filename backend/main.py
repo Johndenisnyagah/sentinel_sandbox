@@ -49,7 +49,6 @@ init_db()
 
 # Track simulation and system stats globally
 stats = {
-    "packets_monitored": 0,
     "simulations_run": 0,
 }
 
@@ -148,8 +147,6 @@ def on_event(event_data):
         event_data.get("ip", "N/A"),
         event_data.get("details", "")
     )
-    stats["packets_monitored"] += 1
-
     schedule_broadcast(event_data)
     rule_engine.process(event_data)
 
@@ -199,7 +196,8 @@ async def get_status():
     return {
         "ids_running": True,  # the API is up
         "live_monitor": detector.running,  # Scapy/psutil monitor (opt-in)
-        "packets_monitored": stats["packets_monitored"] + event_count,
+        "events_processed": event_count,
+        "rules_active": len(rule_engine.rules),
         "alerts_triggered": alert_count,
         "active_connections": len(manager.active_connections),
         "cpu_usage": psutil.cpu_percent(interval=0),

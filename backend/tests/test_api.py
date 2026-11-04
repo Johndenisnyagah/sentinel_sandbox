@@ -22,3 +22,18 @@ def test_unknown_simulation_is_rejected(client):
 
 def test_alerts_start_empty(client):
     assert client.get("/alerts").json() == []
+
+
+def test_status_counts_real_events(app_module, client, monkeypatch):
+    """events_processed is the stored event count (was a double-counted 'packets' figure)."""
+    import asyncio
+
+    async def instant(_):
+        return None
+
+    monkeypatch.setattr("app.simulation.attacker.asyncio.sleep", instant)
+    asyncio.run(app_module.attacker.simulate_port_scan())
+    body = client.get("/status").json()
+    assert body["events_processed"] == len(client.get("/activity").json()) == 15
+    assert "packets_monitored" not in body
+    assert body["rules_active"] == 5
