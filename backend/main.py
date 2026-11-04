@@ -17,17 +17,31 @@ from app.simulation.attacker import SimulationModule
 
 app = FastAPI(title="SentinelSandbox API")
 
-# Configure CORS for production (Render/Vercel)
-# Fetch allowed origins from environment variable, defaulting to wildcard
-allowed_origins = os.getenv("ALLOWED_ORIGINS", "*").split(",")
+# Origins allowed to call the API and open the WebSocket. Set ALLOWED_ORIGINS
+# (comma-separated) in production, e.g. the Vercel frontend URL.
+DEFAULT_ORIGINS = "http://localhost:5173,http://127.0.0.1:5173"
+allowed_origins = [
+    o.strip() for o in os.getenv("ALLOWED_ORIGINS", DEFAULT_ORIGINS).split(",") if o.strip()
+]
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
-    allow_credentials=True,
-    allow_methods=["*"],
+    allow_credentials=False,  # no cookies or auth headers are used
+    allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
+
+
+def origin_allowed(origin: str | None) -> bool:
+    """
+    CORS does not apply to WebSockets: a page on any site can open one. So the
+    WebSocket handshake checks Origin itself (cross-site WebSocket hijacking,
+    CWE-1385). Clients that send no Origin (curl, scripts) are not browsers
+    and cannot be driven by another site, so they are allowed.
+    """
+    return origin is None or "*" in allowed_origins or origin in allowed_origins
+
 
 # Initialize Database on startup
 init_db()
@@ -249,6 +263,9 @@ async def websocket_endpoint(websocket: WebSocket):
     Main WebSocket entry point for the frontend dashboard.
     Keeps the connection open to receive broadcast updates.
     """
+    if not origin_allowed(websocket.headers.get("origin")):
+        await websocket.close(code=1008)  # before accept -> HTTP 403 on the handshake
+        return
     await manager.connect(websocket)
     try:
         while True:
