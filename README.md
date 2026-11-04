@@ -6,7 +6,11 @@ An educational **attack simulator with a threshold-based detection engine** and 
 
 It runs locally (two commands, see [Getting started](#getting-started)). There is no hosted demo: the free-tier backend slept when idle and was too slow to use, so it was taken down.
 
-![Dashboard after a brute force, a port scan and an SQLi probe: three detected alerts, the activity feed and the rules the engine applied](docs/screenshot.png)
+
+
+https://github.com/user-attachments/assets/93522800-f35a-4c8f-b4f7-fcbad924cd76
+
+
 
 ## What is real and what is simulated
 
