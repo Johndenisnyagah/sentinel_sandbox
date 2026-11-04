@@ -17,6 +17,8 @@ import AlertModal from './components/AlertModal'
 // Configuration for API and WebSocket URLs
 // In production (Vercel), these will be set via Environment Variables
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
+// Width of one point on the event-rate chart
+const CHART_BUCKET_MS = 2000
 const WS_URL = import.meta.env.VITE_WS_URL || (API_BASE_URL.replace('http', 'ws') + '/ws/alerts')
 
 const App = () => {
@@ -33,6 +35,8 @@ const App = () => {
   const ws = useRef(null)
   const reconnectTimeout = useRef(null)
   const ipTracker = useRef({}) // In-memory map for source IP frequency tracking
+  const connectRef = useRef(null) // Latest connectWS, so the reconnect timer can call it
+  const eventsInBucket = useRef(0) // Events received since the last chart point
 
   /**
    * Appends a new event to the activity feed with a unique ID and timestamp.
@@ -93,11 +97,7 @@ const App = () => {
           trackIP(data.ip)
         }
         
-        // Push a data point to the traffic graph on every incoming event/pulse
-        setTrafficData(prev => [...prev.slice(-20), {
-          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-          packets: Math.floor(Math.random() * 30) + 5,
-        }])
+        eventsInBucket.current += 1
       } catch (e) {
         console.error('Failed to parse WS message', e)
       }
@@ -105,23 +105,24 @@ const App = () => {
 
     ws.current.onclose = () => {
       addEvent({ event_type: 'error', details: 'Disconnected. Retrying in 5s...', ip: 'system' })
-      reconnectTimeout.current = setTimeout(connectWS, 5000)
+      reconnectTimeout.current = setTimeout(() => connectRef.current?.(), 5000)
     }
 
     ws.current.onerror = () => {
       addEvent({ event_type: 'error', details: 'WebSocket transport error', ip: 'system' })
     }
   }, [addEvent, trackIP])
+  useEffect(() => { connectRef.current = connectWS }, [connectWS])
 
   // ── Initial Data Fetch & Connection ──
   useEffect(() => {
     axios.get(`${API_BASE_URL}/alerts`).then(res => setAlerts(res.data)).catch(() => {})
     axios.get(`${API_BASE_URL}/status`).then(res => setStatus(res.data)).catch(() => {})
     connectWS()
-    addEvent({ event_type: 'info', details: 'IDS monitoring initialized', ip: 'system' })
     
     return () => {
-      if (ws.current) ws.current.close()
+      // Detach onclose first so unmounting does not schedule a reconnect
+      if (ws.current) { ws.current.onclose = null; ws.current.close() }
       if (reconnectTimeout.current) clearTimeout(reconnectTimeout.current)
     }
   }, [connectWS, addEvent])
@@ -134,16 +135,18 @@ const App = () => {
     return () => clearInterval(interval)
   }, [])
 
-  // ── Background Network Noise Simulation (UI helper) ──
+  // ── Event-rate chart: one point every 2 s with the number of events received ──
   useEffect(() => {
     const interval = setInterval(() => {
+      const count = eventsInBucket.current
+      eventsInBucket.current = 0
       setTrafficData(prev => [...prev.slice(-20), {
         time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-        packets: Math.floor(Math.random() * (activeSimulation ? 80 : 20)) + 3,
+        events: count,
       }])
-    }, 2000)
+    }, CHART_BUCKET_MS)
     return () => clearInterval(interval)
-  }, [activeSimulation])
+  }, [])
 
   /**
    * Triggers a specific attack simulation via the backend API.
@@ -158,7 +161,7 @@ const App = () => {
       await axios.post(`${API_BASE_URL}/simulate?attack_type=${type}`)
       // Brief cooldown before reset to ensure backend simulation finishes
       setTimeout(() => setActiveSimulation(null), 5000)
-    } catch (e) {
+    } catch {
       addEvent({ event_type: 'error', details: `Simulation failed: ${type}`, ip: 'system' })
       setActiveSimulation(null)
     }

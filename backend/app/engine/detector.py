@@ -1,132 +1,122 @@
 """
-Core detection engine for Sentinel_Sandbox.
-Provides packet-level analysis using Scapy and system-level monitoring 
-using psutil. Identifies threats based on threshold-based logic.
+Live detection engine for Sentinel_Sandbox.
+
+Watches real traffic with Scapy and host load with psutil, and reports
+threats through a callback. It is off by default: sniffing needs root, so it
+only starts when SENTINEL_LIVE_MONITOR=1 is set.
+
+The engine never writes to the database itself. Persistence and broadcasting
+belong to the callback (``on_alert`` in ``main.py``), so every alert is
+stored exactly once, whichever component raised it.
 """
 
-import psutil
-from scapy.all import sniff, IP, TCP, UDP
+import logging
 import threading
 import time
-import sqlite3
-from ..db.database import log_alert, get_db_connection, DB_PATH
+from collections import defaultdict, deque
+
+import psutil
+
+log = logging.getLogger(__name__)
+
+# A source that touches more than this many distinct ports ...
+PORT_SCAN_THRESHOLD = 10
+# ... within this many seconds is reported as a port scan.
+PORT_SCAN_WINDOW_SECONDS = 10
+CPU_ALERT_PERCENT = 90
+
 
 class DetectionEngine:
-    """
-    Main engine responsible for monitoring network traffic and host metrics.
-    Runs background threads for sniffing and telemetry collection.
-    """
-    def __init__(self, alert_callback):
+    """Port-scan detection on sniffed packets, plus a host CPU check."""
+
+    def __init__(self, alert_callback, clock=time.monotonic):
         """
-        Initializes the engine.
-        :param alert_callback: Function to call when an alert is triggered (usually broadcasts to UI).
+        :param alert_callback: called with an alert dict; stores and broadcasts it.
+        :param clock: time source in seconds (injectable for tests).
         """
         self.alert_callback = alert_callback
+        self.clock = clock
         self.running = False
-        
-        # Internal state for threshold tracking
-        self.failed_logins = {} # IP -> count (placeholder for log analysis)
-        self.connection_attempts = {} # IP -> set of unique ports targeted
-        self.last_check_time = time.time()
+        # source IP -> deque of (timestamp, destination port), oldest first
+        self._probes: dict[str, deque] = defaultdict(deque)
 
     def analyze_packet(self, packet):
-        """
-        Analyzes a single sniffed packet for malicious patterns.
-        Currently focuses on basic port scan detection.
-        """
-        if packet.haslayer(IP):
-            src_ip = packet[IP].src
-            
-            # ── Port Scan Detection ──
-            if packet.haslayer(TCP) or packet.haslayer(UDP):
-                dst_port = packet[TCP].dport if packet.haslayer(TCP) else packet[UDP].dport
-                
-                if src_ip not in self.connection_attempts:
-                    self.connection_attempts[src_ip] = set()
-                
-                self.connection_attempts[src_ip].add(dst_port)
-                
-                # If an IP probes more than 10 unique ports, flag as a scan
-                if len(self.connection_attempts[src_ip]) > 10:
-                    self.trigger_alert(
-                        "Port Scan Detected",
-                        src_ip,
-                        f"Multiple sequential port probes detected ({len(self.connection_attempts[src_ip])} ports)",
-                        "CRITICAL"
-                    )
-                    # Reset tracker for this IP after alert
-                    self.connection_attempts[src_ip] = set()
+        """Track destination ports per source and alert on a scan inside the window."""
+        from scapy.all import IP, TCP, UDP  # imported lazily: scapy is slow to load
+
+        if not packet.haslayer(IP):
+            return
+        if packet.haslayer(TCP):
+            dst_port = packet[TCP].dport
+        elif packet.haslayer(UDP):
+            dst_port = packet[UDP].dport
+        else:
+            return
+
+        src_ip = packet[IP].src
+        now = self.clock()
+        probes = self._probes[src_ip]
+        probes.append((now, dst_port))
+        # Forget probes that fell out of the window
+        while probes and now - probes[0][0] > PORT_SCAN_WINDOW_SECONDS:
+            probes.popleft()
+
+        distinct_ports = {port for _, port in probes}
+        if len(distinct_ports) > PORT_SCAN_THRESHOLD:
+            self.trigger_alert(
+                "Port Scan Detected",
+                src_ip,
+                f"{len(distinct_ports)} distinct ports probed within {PORT_SCAN_WINDOW_SECONDS}s",
+                "CRITICAL",
+                rule_name="Port Scan",
+            )
+            probes.clear()  # one alert per burst, not one per extra packet
+
+    def check_cpu(self, cpu_percent):
+        """Alert when host CPU is above the limit."""
+        if cpu_percent > CPU_ALERT_PERCENT:
+            self.trigger_alert(
+                "High CPU Usage",
+                "LocalHost",
+                f"Abnormal CPU spike detected: {cpu_percent}%",
+                "HIGH",
+                rule_name="Host Metric Anomaly",
+            )
 
     def monitor_system(self):
-        """
-        Background loop for monitoring host telemetry (CPU, memory, processes).
-        Runs every few seconds.
-        """
+        """Background loop sampling host CPU every few seconds."""
         while self.running:
-            # ── CPU Usage Monitoring ──
-            # Alerts if host CPU sustains very high load
-            cpu_percent = psutil.cpu_percent(interval=1)
-            if cpu_percent > 90:
-                self.trigger_alert(
-                    "High CPU Usage",
-                    "LocalHost",
-                    f"Abnormal CPU spike detected: {cpu_percent}%",
-                    "HIGH"
-                )
-            
-            # Simple process count check (can be expanded for process-hiding detection)
-            process_count = len(psutil.pids())
-            
-            time.sleep(5) # Throttled check interval
+            self.check_cpu(psutil.cpu_percent(interval=1))
+            time.sleep(5)
 
     def trigger_alert(self, alert_type, src_ip, description, severity, rule_name=None):
-        """
-        Standardizes the processing of a newly identified threat.
-        Logs to DB and triggers the UI broadcast callback.
-        """
-        # Persist to database using centralized helper
-        log_alert(alert_type, src_ip, description, severity, rule_name)
-        
-        # Prepare payload for real-time UI notification
-        alert_data = {
-            "type": alert_type,
-            "ip": src_ip,
-            "description": description,
-            "severity": severity,
-            "rule_name": rule_name,
-            "time": time.strftime("%H:%M:%S"),
-            "category": "alert" # UI uses this to route message
-        }
-        self.alert_callback(alert_data)
+        """Build the alert payload and hand it to the callback (which stores it)."""
+        self.alert_callback(
+            {
+                "category": "alert",
+                "type": alert_type,
+                "source_ip": src_ip,
+                "description": description,
+                "severity": severity,
+                "rule_name": rule_name,
+                "time": time.strftime("%H:%M:%S"),
+            }
+        )
 
     def _run_sniff(self):
-        """
-        Internal target for the sniffing thread.
-        Utilizes Scapy's high-level sniff function.
-        """
         try:
-            # Note: store=0 prevents memory leaks during long sniffing sessions
-            sniff(prn=self.analyze_packet, store=0)
+            from scapy.all import sniff
+
+            sniff(prn=self.analyze_packet, store=0)  # store=0: don't keep packets in memory
         except Exception as e:
-            print(f"Scapy sniffing failed (likely permission issue): {e}")
+            log.error("Scapy sniffing failed (likely a permission issue): %s", e)
             self.running = False
 
     def start(self):
-        """
-        Starts the detection threads (Network Sniffing + System Monitoring).
-        """
+        """Start the sniffing and host-monitoring threads."""
         self.running = True
-        
-        # Create and start sniffing thread
-        self.sniff_thread = threading.Thread(target=self._run_sniff)
-        self.sniff_thread.daemon = True # Thread dies when main process ends
-        self.sniff_thread.start()
-        
-        # Create and start host telemetry thread
-        self.sys_thread = threading.Thread(target=self.monitor_system)
-        self.sys_thread.daemon = True
-        self.sys_thread.start()
+        threading.Thread(target=self._run_sniff, daemon=True).start()
+        threading.Thread(target=self.monitor_system, daemon=True).start()
 
     def stop(self):
-        """Stops the management loops."""
         self.running = False

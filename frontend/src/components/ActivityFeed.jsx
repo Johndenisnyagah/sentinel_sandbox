@@ -8,9 +8,11 @@ import { ScrollText } from 'lucide-react';
 
 // Semantic color mapping for different event types
 const typeColors = {
-  login_attempt: 'text-severity-high',
+  failed_login: 'text-severity-high',
   connection_attempt: 'text-severity-critical',
-  traffic_spike: 'text-severity-medium',
+  traffic_burst: 'text-severity-medium',
+  syn_burst: 'text-severity-critical',
+  suspicious_query: 'text-severity-high',
   alert: 'text-severity-critical font-bold uppercase',
   info: 'text-text-secondary',
   success: 'text-primary',

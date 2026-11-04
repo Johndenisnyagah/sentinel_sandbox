@@ -1,7 +1,7 @@
 /**
  * SimulationControls component.
  * Provides interactive buttons to trigger synthetic security threats for 
- * testing the IDS detection logic and dashboard visualizations.
+ * The backend emits events only; the rule engine decides whether they alert.
  */
 import React from 'react';
 import { Zap, Terminal, Globe, Activity, Loader, ArrowRight, ShieldAlert } from 'lucide-react';
@@ -28,9 +28,9 @@ const simulations = [
   },
   { 
     id: 'DDOS', 
-    label: 'Simulate DDoS Attack', 
+    label: 'Simulate SYN Flood', 
     icon: Zap, 
-    desc: 'High-intensity SYN flood burst' 
+    desc: 'Rapid SYN bursts at web ports' 
   },
   { 
     id: 'SQLI', 

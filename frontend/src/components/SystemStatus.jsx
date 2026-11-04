@@ -7,13 +7,16 @@ import React from 'react';
 import { Shield } from 'lucide-react';
 
 const SystemStatus = ({ status }) => {
-  // Check if the detection backend is reported as active
+  // Backend reachable and reporting
   const isRunning = status?.ids_running;
+  // Live Scapy/psutil monitor is opt-in (needs root); simulations work without it
+  const liveMonitor = status?.live_monitor;
 
   // Formatting metrics for the vertical list display
   const metrics = [
     { label: 'IDS Engine', value: isRunning ? 'RUNNING' : 'STOPPED', highlight: isRunning },
-    { label: 'Packets Monitored', value: status?.packets_monitored?.toLocaleString() ?? '—' },
+    { label: 'Live Monitor', value: status ? (liveMonitor ? 'ON' : 'OFF') : '—', highlight: liveMonitor },
+    { label: 'Events Processed', value: status?.events_processed?.toLocaleString() ?? '—' },
     { label: 'Alerts Triggered', value: status?.alerts_triggered ?? '—' },
     { label: 'Active Connections', value: status?.active_connections ?? '—' },
     { label: 'CPU Usage', value: status?.cpu_usage != null ? `${Math.round(status.cpu_usage)}%` : '—' },

@@ -1,23 +1,53 @@
 """
 Database utility module for Sentinel_Sandbox.
-Handles SQLite initialization, connection management, and simplified 
+Handles SQLite initialization, connection management, and simplified
 logging for system events and security alerts.
 """
 
-import sqlite3
+import logging
 import os
+import sqlite3
+from contextlib import closing
 
-# Define database file path relative to this file
-DB_PATH = os.path.join(os.path.dirname(__file__), "sentinel.db")
+log = logging.getLogger(__name__)
+
+# Database file path; override with SENTINEL_DB_PATH (tests use a temp file)
+DB_PATH = os.environ.get(
+    "SENTINEL_DB_PATH", os.path.join(os.path.dirname(__file__), "sentinel.db")
+)
+
+# (name, event_type it watches, measure, threshold, window s, severity, shown text).
+# A rule fires when the measure over the window is GREATER than the threshold.
+DEFAULT_RULES = [
+    ("Brute Force", "failed_login", "count", 5, 30, "HIGH", ">5 failed logins / 30s"),
+    ("Port Scan", "connection_attempt", "distinct:port", 10, 10, "CRITICAL", ">10 distinct ports / 10s"),
+    ("Traffic Flood", "traffic_burst", "sum:packets", 1000, 60, "MEDIUM", ">1000 packets / 60s"),
+    ("SYN Flood", "syn_burst", "sum:packets", 50, 5, "CRITICAL", ">50 SYN packets / 5s"),
+    ("SQLi Probe", "suspicious_query", "count", 3, 10, "HIGH", ">3 SQL injection payloads / 10s"),
+    ("Host Metric Anomaly", "cpu_usage", "live", 90, 0, "HIGH", "CPU > 90% (live monitor only)"),
+]
+
+
+def load_rules():
+    """Rules the engine applies (rows with the 'live' measure belong to the live monitor)."""
+    from ..engine.rules import Rule
+
+    with closing(get_db_connection()) as conn:
+        rows = conn.execute(
+            "SELECT name, pattern, measure, threshold, window, severity, condition_text "
+            "FROM rules WHERE measure != 'live'"
+        ).fetchall()
+    return [Rule(**dict(r)) for r in rows]
+
 
 def init_db():
     """
     Initializes the SQLite database with required tables if they do not exist.
     Populates default detection rules on first initialization.
     """
-    with sqlite3.connect(DB_PATH) as conn:
+    with closing(sqlite3.connect(DB_PATH)) as conn, conn:
         cursor = conn.cursor()
-        
+
         # Alerts Table — Stores final detected threats with severity
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS alerts (
@@ -30,7 +60,7 @@ def init_db():
             timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
         )
         """)
-        
+
         # Events Table — Stores intermediate activity feed data (e.g., login attempts)
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS events (
@@ -41,38 +71,34 @@ def init_db():
             timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
         )
         """)
-        
-        # Rules Table — Stores threshold-based detection rules
+
+        # Rules Table — threshold rules applied by app/engine/rules.py.
+        # Databases from before the rule engine have no `measure` column;
+        # their rules were display-only, so they are replaced.
+        cols = [row[1] for row in cursor.execute("PRAGMA table_info(rules)")]
+        if cols and "measure" not in cols:
+            cursor.execute("DROP TABLE rules")
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS rules (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL,
             pattern TEXT,
+            measure TEXT NOT NULL DEFAULT 'count',
             threshold INTEGER,
             window INTEGER,
             severity TEXT,
             condition_text TEXT
         )
         """)
-        
-        # Bootstrap default rules for simulation purposes
+
         cursor.execute("SELECT COUNT(*) FROM rules")
         if cursor.fetchone()[0] == 0:
-            default_rules = [
-                ("Brute Force", "failed_login", 5, 30, "HIGH", ">5 login failures / 30s"),
-                ("Port Scan", "connection_attempt", 10, 10, "CRITICAL", ">10 ports accessed / 10s"),
-                ("Traffic Flood", "packet_count", 1000, 60, "MEDIUM", ">1000 packets / 60s"),
-                ("Host Metric Anomaly", "cpu_usage", 90, 30, "HIGH", "CPU > 90% for 30s"),
-                ("DDoS Botnet Pattern", "syn_flood", 50, 5, "CRITICAL", ">50 SYN packets / 5s"),
-                ("Unauthorized Access", "auth_bypass", 1, 1, "CRITICAL", "Admin path probe detected"),
-                ("SQLi Probe", "suspicious_query", 3, 10, "HIGH", "SQL injection patterns detected")
-            ]
             cursor.executemany(
-                "INSERT INTO rules (name, pattern, threshold, window, severity, condition_text) VALUES (?, ?, ?, ?, ?, ?)",
-                default_rules
+                "INSERT INTO rules (name, pattern, measure, threshold, window, severity, condition_text) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                DEFAULT_RULES,
             )
-        
-        conn.commit()
+
 
 def log_event(event_type, source_ip, details):
     """
@@ -80,15 +106,14 @@ def log_event(event_type, source_ip, details):
     Used for granular activity tracking (Activity Feed).
     """
     try:
-        with sqlite3.connect(DB_PATH) as conn:
+        with closing(sqlite3.connect(DB_PATH)) as conn, conn:
             cursor = conn.cursor()
             cursor.execute(
                 "INSERT INTO events (event_type, source_ip, details) VALUES (?, ?, ?)",
                 (event_type, source_ip, details)
             )
-            conn.commit()
     except Exception as e:
-        print(f"Failed to log event: {e}")
+        log.error("Failed to log event: %s", e)
 
 def log_alert(alert_type, source_ip, description, severity, rule_name=None):
     """
@@ -96,16 +121,15 @@ def log_alert(alert_type, source_ip, description, severity, rule_name=None):
     Returns the ID of the new record (useful for forensic linkage).
     """
     try:
-        with sqlite3.connect(DB_PATH) as conn:
+        with closing(sqlite3.connect(DB_PATH)) as conn, conn:
             cursor = conn.cursor()
             cursor.execute(
                 "INSERT INTO alerts (type, source_ip, description, severity, rule_name) VALUES (?, ?, ?, ?, ?)",
                 (alert_type, source_ip, description, severity, rule_name)
             )
-            conn.commit()
             return cursor.lastrowid
     except Exception as e:
-        print(f"Failed to log alert: {e}")
+        log.error("Failed to log alert: %s", e)
         return None
 
 def get_db_connection():
