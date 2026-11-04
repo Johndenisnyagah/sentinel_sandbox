@@ -27,7 +27,7 @@ async def lifespan(_app: FastAPI):
     """Startup: capture the loop, start the heartbeat, optionally the live monitor. Shutdown: stop it."""
     global main_loop
     main_loop = asyncio.get_running_loop()
-    manager.start_heartbeat()  # keeps idle WebSockets open on Render (~55 s idle limit)
+    manager.start_heartbeat()  # keeps idle WebSockets open behind proxies that drop quiet connections
     if os.getenv("SENTINEL_LIVE_MONITOR") == "1":  # sniffing needs root, so it is opt-in
         detector.start()
         log.info("Live monitor started")
@@ -40,7 +40,7 @@ async def lifespan(_app: FastAPI):
 app = FastAPI(title="SentinelSandbox API", lifespan=lifespan)
 
 # Origins allowed to call the API and open the WebSocket. Set ALLOWED_ORIGINS
-# (comma-separated) in production, e.g. the Vercel frontend URL.
+# (comma-separated) if the frontend is served from another origin.
 DEFAULT_ORIGINS = "http://localhost:5173,http://127.0.0.1:5173"
 allowed_origins = [
     o.strip() for o in os.getenv("ALLOWED_ORIGINS", DEFAULT_ORIGINS).split(",") if o.strip()
@@ -77,7 +77,7 @@ class ConnectionManager:
     """
     Manages active WebSocket connections for real-time alert/event broadcasting.
     Includes a heartbeat mechanism to prevent connection timeouts on hosting
-    providers like Render (which closes idle connections after ~55s).
+    proxies and hosting providers that close idle connections (often after ~55s).
     """
     def __init__(self):
         self.active_connections: list[WebSocket] = []

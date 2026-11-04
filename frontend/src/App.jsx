@@ -15,7 +15,7 @@ import RulesViewer from './components/RulesViewer'
 import AlertModal from './components/AlertModal'
 
 // Configuration for API and WebSocket URLs
-// In production (Vercel), these will be set via Environment Variables
+// Override with VITE_API_BASE_URL / VITE_WS_URL (see .env.example)
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
 // Width of one point on the event-rate chart
 const CHART_BUCKET_MS = 2000
