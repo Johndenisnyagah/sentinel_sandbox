@@ -1,15 +1,17 @@
 """
 Core detection engine for Sentinel_Sandbox.
-Provides packet-level analysis using Scapy and system-level monitoring 
+Provides packet-level analysis using Scapy and system-level monitoring
 using psutil. Identifies threats based on threshold-based logic.
 """
 
-import psutil
-from scapy.all import sniff, IP, TCP, UDP
 import threading
 import time
-import sqlite3
-from ..db.database import log_alert, get_db_connection, DB_PATH
+
+import psutil
+from scapy.all import IP, TCP, UDP, sniff
+
+from ..db.database import log_alert
+
 
 class DetectionEngine:
     """
@@ -23,7 +25,7 @@ class DetectionEngine:
         """
         self.alert_callback = alert_callback
         self.running = False
-        
+
         # Internal state for threshold tracking
         self.failed_logins = {} # IP -> count (placeholder for log analysis)
         self.connection_attempts = {} # IP -> set of unique ports targeted
@@ -36,16 +38,16 @@ class DetectionEngine:
         """
         if packet.haslayer(IP):
             src_ip = packet[IP].src
-            
+
             # ── Port Scan Detection ──
             if packet.haslayer(TCP) or packet.haslayer(UDP):
                 dst_port = packet[TCP].dport if packet.haslayer(TCP) else packet[UDP].dport
-                
+
                 if src_ip not in self.connection_attempts:
                     self.connection_attempts[src_ip] = set()
-                
+
                 self.connection_attempts[src_ip].add(dst_port)
-                
+
                 # If an IP probes more than 10 unique ports, flag as a scan
                 if len(self.connection_attempts[src_ip]) > 10:
                     self.trigger_alert(
@@ -73,10 +75,8 @@ class DetectionEngine:
                     f"Abnormal CPU spike detected: {cpu_percent}%",
                     "HIGH"
                 )
-            
-            # Simple process count check (can be expanded for process-hiding detection)
-            process_count = len(psutil.pids())
-            
+
+
             time.sleep(5) # Throttled check interval
 
     def trigger_alert(self, alert_type, src_ip, description, severity, rule_name=None):
@@ -86,7 +86,7 @@ class DetectionEngine:
         """
         # Persist to database using centralized helper
         log_alert(alert_type, src_ip, description, severity, rule_name)
-        
+
         # Prepare payload for real-time UI notification
         alert_data = {
             "type": alert_type,
@@ -116,12 +116,12 @@ class DetectionEngine:
         Starts the detection threads (Network Sniffing + System Monitoring).
         """
         self.running = True
-        
+
         # Create and start sniffing thread
         self.sniff_thread = threading.Thread(target=self._run_sniff)
         self.sniff_thread.daemon = True # Thread dies when main process ends
         self.sniff_thread.start()
-        
+
         # Create and start host telemetry thread
         self.sys_thread = threading.Thread(target=self.monitor_system)
         self.sys_thread.daemon = True

@@ -33,6 +33,7 @@ const App = () => {
   const ws = useRef(null)
   const reconnectTimeout = useRef(null)
   const ipTracker = useRef({}) // In-memory map for source IP frequency tracking
+  const connectRef = useRef(null) // Latest connectWS, so the reconnect timer can call it
 
   /**
    * Appends a new event to the activity feed with a unique ID and timestamp.
@@ -105,23 +106,24 @@ const App = () => {
 
     ws.current.onclose = () => {
       addEvent({ event_type: 'error', details: 'Disconnected. Retrying in 5s...', ip: 'system' })
-      reconnectTimeout.current = setTimeout(connectWS, 5000)
+      reconnectTimeout.current = setTimeout(() => connectRef.current?.(), 5000)
     }
 
     ws.current.onerror = () => {
       addEvent({ event_type: 'error', details: 'WebSocket transport error', ip: 'system' })
     }
   }, [addEvent, trackIP])
+  useEffect(() => { connectRef.current = connectWS }, [connectWS])
 
   // ── Initial Data Fetch & Connection ──
   useEffect(() => {
     axios.get(`${API_BASE_URL}/alerts`).then(res => setAlerts(res.data)).catch(() => {})
     axios.get(`${API_BASE_URL}/status`).then(res => setStatus(res.data)).catch(() => {})
     connectWS()
-    addEvent({ event_type: 'info', details: 'IDS monitoring initialized', ip: 'system' })
     
     return () => {
-      if (ws.current) ws.current.close()
+      // Detach onclose first so unmounting does not schedule a reconnect
+      if (ws.current) { ws.current.onclose = null; ws.current.close() }
       if (reconnectTimeout.current) clearTimeout(reconnectTimeout.current)
     }
   }, [connectWS, addEvent])
@@ -158,7 +160,7 @@ const App = () => {
       await axios.post(`${API_BASE_URL}/simulate?attack_type=${type}`)
       // Brief cooldown before reset to ensure backend simulation finishes
       setTimeout(() => setActiveSimulation(null), 5000)
-    } catch (e) {
+    } catch {
       addEvent({ event_type: 'error', details: `Simulation failed: ${type}`, ip: 'system' })
       setActiveSimulation(null)
     }

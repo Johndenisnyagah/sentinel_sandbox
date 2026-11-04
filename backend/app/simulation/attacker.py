@@ -1,16 +1,17 @@
 """
 Attack Simulation Module for Sentinel_Sandbox.
-Generates synthetic network events and security alerts to demonstrate 
+Generates synthetic network events and security alerts to demonstrate
 the IDS detection capabilities and UI response.
 """
 
+import asyncio
 import random
 import time
-import asyncio
+
 
 class SimulationModule:
     """
-    Simulates various cyber-attack patterns by emitting granular events 
+    Simulates various cyber-attack patterns by emitting granular events
     followed by a final high-severity alert.
     """
     def __init__(self, alert_callback, event_callback):
@@ -100,7 +101,7 @@ class SimulationModule:
 
         # ── Phase 1: Traffic Bursts ──
         # Simulates bursts of traffic appearing in the network activity graph
-        for i in range(5):
+        for _ in range(5):
             chunk = packet_count // 5
             self.emit_event({
                 "category": "event",
@@ -139,7 +140,7 @@ class SimulationModule:
             "time": time.strftime("%H:%M:%S")
         })
         await asyncio.sleep(1)
-        
+
         self.trigger_alert({
             "category": "alert",
             "type": "DDoS Botnet Pattern",
@@ -160,7 +161,7 @@ class SimulationModule:
         """
         src_ip = f"45.88.1.{random.randint(2, 254)}"
         payloads = ["' OR 1=1 --", "'; DROP TABLE users; --", "UNION SELECT null, username, password FROM users"]
-        
+
         for payload in payloads:
             self.emit_event({
                 "category": "event",

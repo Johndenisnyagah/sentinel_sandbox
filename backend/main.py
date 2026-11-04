@@ -1,19 +1,19 @@
 """
 Main entry point for the SentinelSandbox FastAPI backend.
-Handles API routing, WebSocket connections, and coordination between 
+Handles API routing, WebSocket connections, and coordination between
 the detection engine and simulation modules.
 """
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
 import asyncio
+import os
+
 import psutil
-import time
-from app.db.database import init_db, get_db_connection, log_event, log_alert
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
+
+from app.db.database import get_db_connection, init_db, log_alert, log_event
 from app.engine.detector import DetectionEngine
 from app.simulation.attacker import SimulationModule
-
-import os
 
 app = FastAPI(title="SentinelSandbox API")
 
@@ -41,7 +41,7 @@ stats = {
 class ConnectionManager:
     """
     Manages active WebSocket connections for real-time alert/event broadcasting.
-    Includes a heartbeat mechanism to prevent connection timeouts on hosting 
+    Includes a heartbeat mechanism to prevent connection timeouts on hosting
     providers like Render (which closes idle connections after ~55s).
     """
     def __init__(self):
@@ -62,14 +62,14 @@ class ConnectionManager:
         """Sends a JSON message to all currently connected clients."""
         if not self.active_connections:
             return
-            
+
         disconnected = []
         for connection in self.active_connections:
             try:
                 await connection.send_json(message)
             except Exception:
                 disconnected.append(connection)
-        
+
         for conn in disconnected:
             self.disconnect(conn)
 
@@ -100,10 +100,10 @@ def on_alert(alert_data):
         alert_data.get("severity", "LOW"),
         alert_data.get("rule_name")
     )
-    
+
     # Update global metrics
     stats["packets_monitored"] += alert_data.get("packets_detected", 1)
-    
+
     # Broadcast to WebSocket clients
     try:
         loop = asyncio.get_event_loop()
@@ -125,7 +125,7 @@ def on_event(event_data):
         event_data.get("details", "")
     )
     stats["packets_monitored"] += 1
-    
+
     # Broadcast to WebSocket clients
     try:
         loop = asyncio.get_event_loop()
@@ -146,7 +146,6 @@ async def startup_event():
     # Start the WebSocket heartbeat loop to prevent Render timeouts
     manager.start_heartbeat()
     # detector.start()  # Uncomment to enable live NIC monitoring (requires Admin/Sudo)
-    pass
 
 @app.on_event("shutdown")
 async def shutdown_event():
@@ -163,7 +162,7 @@ async def root():
 @app.get("/status")
 async def get_status():
     """
-    Returns high-level system metrics including database counts, 
+    Returns high-level system metrics including database counts,
     active connections, and CPU usage.
     """
     conn = get_db_connection()
@@ -173,7 +172,7 @@ async def get_status():
     cursor.execute("SELECT COUNT(*) as cnt FROM events")
     event_count = cursor.fetchone()["cnt"]
     conn.close()
-    
+
     return {
         "ids_running": True,
         "packets_monitored": stats["packets_monitored"] + event_count,
@@ -232,7 +231,7 @@ async def simulate_attack(attack_type: str):
         asyncio.create_task(attacker.simulate_sqli())
     else:
         raise HTTPException(status_code=400, detail="Invalid attack type")
-    
+
     return {"status": "simulation_started", "type": attack_type}
 
 @app.websocket("/ws/alerts")

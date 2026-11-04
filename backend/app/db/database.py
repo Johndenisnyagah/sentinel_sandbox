@@ -1,14 +1,16 @@
 """
 Database utility module for Sentinel_Sandbox.
-Handles SQLite initialization, connection management, and simplified 
+Handles SQLite initialization, connection management, and simplified
 logging for system events and security alerts.
 """
 
-import sqlite3
 import os
+import sqlite3
 
-# Define database file path relative to this file
-DB_PATH = os.path.join(os.path.dirname(__file__), "sentinel.db")
+# Database file path; override with SENTINEL_DB_PATH (tests use a temp file)
+DB_PATH = os.environ.get(
+    "SENTINEL_DB_PATH", os.path.join(os.path.dirname(__file__), "sentinel.db")
+)
 
 def init_db():
     """
@@ -17,7 +19,7 @@ def init_db():
     """
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()
-        
+
         # Alerts Table — Stores final detected threats with severity
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS alerts (
@@ -30,7 +32,7 @@ def init_db():
             timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
         )
         """)
-        
+
         # Events Table — Stores intermediate activity feed data (e.g., login attempts)
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS events (
@@ -41,7 +43,7 @@ def init_db():
             timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
         )
         """)
-        
+
         # Rules Table — Stores threshold-based detection rules
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS rules (
@@ -54,7 +56,7 @@ def init_db():
             condition_text TEXT
         )
         """)
-        
+
         # Bootstrap default rules for simulation purposes
         cursor.execute("SELECT COUNT(*) FROM rules")
         if cursor.fetchone()[0] == 0:
@@ -68,10 +70,11 @@ def init_db():
                 ("SQLi Probe", "suspicious_query", 3, 10, "HIGH", "SQL injection patterns detected")
             ]
             cursor.executemany(
-                "INSERT INTO rules (name, pattern, threshold, window, severity, condition_text) VALUES (?, ?, ?, ?, ?, ?)",
+                "INSERT INTO rules (name, pattern, threshold, window, severity, condition_text) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
                 default_rules
             )
-        
+
         conn.commit()
 
 def log_event(event_type, source_ip, details):
