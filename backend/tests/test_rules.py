@@ -163,9 +163,10 @@ def test_old_display_only_rules_table_is_replaced(tmp_path, monkeypatch):
     import importlib
     import sqlite3
     import sys
+    from contextlib import closing
 
     db = tmp_path / "old.db"
-    with sqlite3.connect(db) as conn:
+    with closing(sqlite3.connect(db)) as conn, conn:
         conn.execute(
             "CREATE TABLE rules (id INTEGER PRIMARY KEY, name TEXT, pattern TEXT, threshold INTEGER,"
             " window INTEGER, severity TEXT, condition_text TEXT)"

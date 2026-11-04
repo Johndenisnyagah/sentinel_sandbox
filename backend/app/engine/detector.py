@@ -10,11 +10,14 @@ belong to the callback (``on_alert`` in ``main.py``), so every alert is
 stored exactly once, whichever component raised it.
 """
 
+import logging
 import threading
 import time
 from collections import defaultdict, deque
 
 import psutil
+
+log = logging.getLogger(__name__)
 
 # A source that touches more than this many distinct ports ...
 PORT_SCAN_THRESHOLD = 10
@@ -106,7 +109,7 @@ class DetectionEngine:
 
             sniff(prn=self.analyze_packet, store=0)  # store=0: don't keep packets in memory
         except Exception as e:
-            print(f"Scapy sniffing failed (likely a permission issue): {e}")
+            log.error("Scapy sniffing failed (likely a permission issue): %s", e)
             self.running = False
 
     def start(self):

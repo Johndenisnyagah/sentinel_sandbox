@@ -4,8 +4,12 @@ Handles SQLite initialization, connection management, and simplified
 logging for system events and security alerts.
 """
 
+import logging
 import os
 import sqlite3
+from contextlib import closing
+
+log = logging.getLogger(__name__)
 
 # Database file path; override with SENTINEL_DB_PATH (tests use a temp file)
 DB_PATH = os.environ.get(
@@ -28,12 +32,11 @@ def load_rules():
     """Rules the engine applies (rows with the 'live' measure belong to the live monitor)."""
     from ..engine.rules import Rule
 
-    conn = get_db_connection()
-    rows = conn.execute(
-        "SELECT name, pattern, measure, threshold, window, severity, condition_text "
-        "FROM rules WHERE measure != 'live'"
-    ).fetchall()
-    conn.close()
+    with closing(get_db_connection()) as conn:
+        rows = conn.execute(
+            "SELECT name, pattern, measure, threshold, window, severity, condition_text "
+            "FROM rules WHERE measure != 'live'"
+        ).fetchall()
     return [Rule(**dict(r)) for r in rows]
 
 
@@ -42,7 +45,7 @@ def init_db():
     Initializes the SQLite database with required tables if they do not exist.
     Populates default detection rules on first initialization.
     """
-    with sqlite3.connect(DB_PATH) as conn:
+    with closing(sqlite3.connect(DB_PATH)) as conn, conn:
         cursor = conn.cursor()
 
         # Alerts Table — Stores final detected threats with severity
@@ -96,7 +99,6 @@ def init_db():
                 DEFAULT_RULES,
             )
 
-        conn.commit()
 
 def log_event(event_type, source_ip, details):
     """
@@ -104,15 +106,14 @@ def log_event(event_type, source_ip, details):
     Used for granular activity tracking (Activity Feed).
     """
     try:
-        with sqlite3.connect(DB_PATH) as conn:
+        with closing(sqlite3.connect(DB_PATH)) as conn, conn:
             cursor = conn.cursor()
             cursor.execute(
                 "INSERT INTO events (event_type, source_ip, details) VALUES (?, ?, ?)",
                 (event_type, source_ip, details)
             )
-            conn.commit()
     except Exception as e:
-        print(f"Failed to log event: {e}")
+        log.error("Failed to log event: %s", e)
 
 def log_alert(alert_type, source_ip, description, severity, rule_name=None):
     """
@@ -120,16 +121,15 @@ def log_alert(alert_type, source_ip, description, severity, rule_name=None):
     Returns the ID of the new record (useful for forensic linkage).
     """
     try:
-        with sqlite3.connect(DB_PATH) as conn:
+        with closing(sqlite3.connect(DB_PATH)) as conn, conn:
             cursor = conn.cursor()
             cursor.execute(
                 "INSERT INTO alerts (type, source_ip, description, severity, rule_name) VALUES (?, ?, ?, ?, ?)",
                 (alert_type, source_ip, description, severity, rule_name)
             )
-            conn.commit()
             return cursor.lastrowid
     except Exception as e:
-        print(f"Failed to log alert: {e}")
+        log.error("Failed to log alert: %s", e)
         return None
 
 def get_db_connection():
